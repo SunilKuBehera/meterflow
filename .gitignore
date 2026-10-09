@@ -218,3 +218,37 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# MeterFlow monorepo
+backend/.env
+backend/.venv
+backend/uv.lock
+backend/.ruff_cache
+backend/.mypy_cache
+backend/.pytest_cache
+backend/htmlcov
+backend/.coverage
+backend/dist
+backend/build
+backend/*.egg-info
+
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+frontend/node_modules
+frontend/.next
+frontend/out
+frontend/build
+frontend/dist
+frontend/*.log
+frontend/.vercel
+frontend/.turbo
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
