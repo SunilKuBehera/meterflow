@@ -43,6 +43,7 @@ dev-dependencies = [
     "faker==25.3.0",
     "ruff==0.6.9",
     "mypy==1.11.2",
+    "aiosqlite>=0.22.1",
 ]
 
 [build-system]
