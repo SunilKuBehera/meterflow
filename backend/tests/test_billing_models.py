@@ -137,19 +137,11 @@ class TestPlanModel:
 
     @pytest.mark.asyncio
     async def test_create_free_plan(self, db_session: AsyncSession):
-        plan = Plan(
-            name=PlanName.FREE,
-            display_name="Free",
-            description="Free tier",
-            price_paise=0,
-            api_calls_limit=1000,
-            ai_tokens_limit=100000,
-        )
-        db_session.add(plan)
-        await db_session.commit()
-        await db_session.refresh(plan)
-
-        assert plan.id is not None
+        # Plans are seeded in fixture, test querying instead
+        from repositories.billing import PlanRepository
+        plan_repo = PlanRepository(db_session)
+        plan = await plan_repo.get_by_name(PlanName.FREE)
+        assert plan is not None
         assert plan.name == PlanName.FREE
         assert plan.price_paise == 0
         assert plan.api_calls_limit == 1000
@@ -158,23 +150,10 @@ class TestPlanModel:
 
     @pytest.mark.asyncio
     async def test_create_pro_plan(self, db_session: AsyncSession):
-        plan = Plan(
-            name=PlanName.PRO,
-            display_name="Pro",
-            description="Pro tier",
-            price_paise=99900,
-            api_calls_limit=100000,
-            ai_tokens_limit=10000000,
-            api_call_price_paise=10,
-            ai_input_token_price_paise=5,
-            ai_cached_input_token_price_paise=1,
-            ai_output_token_price_paise=15,
-            ai_reasoning_token_price_paise=15,
-        )
-        db_session.add(plan)
-        await db_session.commit()
-        await db_session.refresh(plan)
-
+        from repositories.billing import PlanRepository
+        plan_repo = PlanRepository(db_session)
+        plan = await plan_repo.get_by_name(PlanName.PRO)
+        assert plan is not None
         assert plan.name == PlanName.PRO
         assert plan.price_paise == 99900
         assert plan.api_calls_limit == 100000
@@ -182,37 +161,25 @@ class TestPlanModel:
 
     @pytest.mark.asyncio
     async def test_plan_name_unique(self, db_session: AsyncSession):
-        plan1 = Plan(
+        # Try to create a duplicate FREE plan (already seeded)
+        plan = Plan(
             name=PlanName.FREE,
-            display_name="Free",
-            price_paise=0,
-            api_calls_limit=1000,
-            ai_tokens_limit=100000,
-        )
-        plan2 = Plan(
-            name=PlanName.FREE,  # Duplicate
             display_name="Free Duplicate",
             price_paise=0,
             api_calls_limit=1000,
             ai_tokens_limit=100000,
         )
-        db_session.add_all([plan1, plan2])
+        db_session.add(plan)
 
         with pytest.raises(IntegrityError):
             await db_session.commit()
 
     @pytest.mark.asyncio
     async def test_plan_defaults(self, db_session: AsyncSession):
-        plan = Plan(
-            name=PlanName.FREE,
-            display_name="Free",
-            price_paise=0,
-            api_calls_limit=1000,
-            ai_tokens_limit=100000,
-        )
-        db_session.add(plan)
-        await db_session.commit()
-        await db_session.refresh(plan)
+        from repositories.billing import PlanRepository
+        plan_repo = PlanRepository(db_session)
+        plan = await plan_repo.get_by_name(PlanName.FREE)
+        assert plan is not None
 
         assert plan.currency == "INR"
         assert plan.billing_period == "monthly"
@@ -230,19 +197,16 @@ class TestSubscriptionModel:
 
     @pytest.mark.asyncio
     async def test_create_subscription(self, db_session: AsyncSession):
-        # Create tenant and plan first
+        # Create tenant and use seeded plan
         tenant = Tenant(name="Test Tenant", slug="test-sub-tenant")
-        plan = Plan(
-            name=PlanName.FREE,
-            display_name="Free",
-            price_paise=0,
-            api_calls_limit=1000,
-            ai_tokens_limit=100000,
-        )
-        db_session.add_all([tenant, plan])
+        db_session.add(tenant)
         await db_session.commit()
         await db_session.refresh(tenant)
-        await db_session.refresh(plan)
+
+        from repositories.billing import PlanRepository
+        plan_repo = PlanRepository(db_session)
+        plan = await plan_repo.get_by_name(PlanName.FREE)
+        assert plan is not None
 
         now = datetime.now(UTC)
         from services.billing_period import get_billing_period_bounds
@@ -269,17 +233,14 @@ class TestSubscriptionModel:
     @pytest.mark.asyncio
     async def test_subscription_defaults(self, db_session: AsyncSession):
         tenant = Tenant(name="Test Tenant", slug="test-sub-defaults")
-        plan = Plan(
-            name=PlanName.FREE,
-            display_name="Free",
-            price_paise=0,
-            api_calls_limit=1000,
-            ai_tokens_limit=100000,
-        )
-        db_session.add_all([tenant, plan])
+        db_session.add(tenant)
         await db_session.commit()
         await db_session.refresh(tenant)
-        await db_session.refresh(plan)
+
+        from repositories.billing import PlanRepository
+        plan_repo = PlanRepository(db_session)
+        plan = await plan_repo.get_by_name(PlanName.FREE)
+        assert plan is not None
 
         now = datetime.now(UTC)
         from services.billing_period import get_billing_period_bounds
@@ -301,25 +262,16 @@ class TestSubscriptionModel:
     @pytest.mark.asyncio
     async def test_unique_tenant_subscription(self, db_session: AsyncSession):
         tenant = Tenant(name="Test Tenant", slug="test-unique-sub")
-        plan1 = Plan(
-            name=PlanName.FREE,
-            display_name="Free",
-            price_paise=0,
-            api_calls_limit=1000,
-            ai_tokens_limit=100000,
-        )
-        plan2 = Plan(
-            name=PlanName.PRO,
-            display_name="Pro",
-            price_paise=99900,
-            api_calls_limit=100000,
-            ai_tokens_limit=10000000,
-        )
-        db_session.add_all([tenant, plan1, plan2])
+        db_session.add(tenant)
         await db_session.commit()
         await db_session.refresh(tenant)
-        await db_session.refresh(plan1)
-        await db_session.refresh(plan2)
+
+        from repositories.billing import PlanRepository
+        plan_repo = PlanRepository(db_session)
+        plan1 = await plan_repo.get_by_name(PlanName.FREE)
+        plan2 = await plan_repo.get_by_name(PlanName.PRO)
+        assert plan1 is not None
+        assert plan2 is not None
 
         now = datetime.now(UTC)
         from services.billing_period import get_billing_period_bounds
@@ -345,16 +297,14 @@ class TestSubscriptionModel:
     @pytest.mark.asyncio
     async def test_cascade_delete_tenant_subscription(self, db_session: AsyncSession):
         tenant = Tenant(name="Test Tenant", slug="test-sub-cascade")
-        plan = Plan(
-            name=PlanName.FREE,
-            display_name="Free",
-            price_paise=0,
-            api_calls_limit=1000,
-            ai_tokens_limit=100000,
-        )
-        db_session.add_all([tenant, plan])
+        db_session.add(tenant)
         await db_session.commit()
         await db_session.refresh(tenant)
+
+        from repositories.billing import PlanRepository
+        plan_repo = PlanRepository(db_session)
+        plan = await plan_repo.get_by_name(PlanName.FREE)
+        assert plan is not None
         await db_session.refresh(plan)
 
         now = datetime.now(UTC)

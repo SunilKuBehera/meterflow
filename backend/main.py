@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.billing import router as billing_router
 from core.config import get_settings
 from core.errors import register_exception_handlers
 from core.logging import configure_logging, get_logger
@@ -46,6 +47,9 @@ app.add_middleware(
 )
 
 register_exception_handlers(app)
+
+# Include routers
+app.include_router(billing_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health", tags=["health"])
