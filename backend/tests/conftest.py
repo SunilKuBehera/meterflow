@@ -65,7 +65,7 @@ async def engine():
 
     # Import all models BEFORE creating tables to register them with Base.metadata
     from models.base import Base
-    from models.billing import Plan, Subscription, Tenant, TenantMember  # noqa: F401
+    from models.billing import Plan, Subscription, Tenant, TenantMember, UsageEvent  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -83,7 +83,7 @@ async def db_session(engine) -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:
         # Truncate all tables before each test to ensure clean state
         async with session.begin():
-            await session.execute(text("TRUNCATE TABLE subscriptions, plans, tenant_members, tenants RESTART IDENTITY CASCADE"))
+            await session.execute(text("TRUNCATE TABLE usage_events, subscriptions, plans, tenant_members, tenants RESTART IDENTITY CASCADE"))
         # Re-seed plans after truncate
         await _seed_plans(session)
 

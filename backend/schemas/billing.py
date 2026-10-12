@@ -153,7 +153,9 @@ class SubscriptionWithRelations(SubscriptionResponse):
 
 
 class UsageRecord(BaseModel):
+    id: UUID | None = None
     tenant_id: UUID
+    idempotency_key: str = Field(..., max_length=255)
     api_calls: int = Field(default=0, ge=0)
     ai_input_tokens: int = Field(default=0, ge=0)
     ai_cached_input_tokens: int = Field(default=0, ge=0)
