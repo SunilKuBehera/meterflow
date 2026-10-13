@@ -10,10 +10,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.billing import (
+    PlanName,
     Tenant,
     UsageEvent,
 )
+from repositories.billing import PlanRepository
 from repositories.usage import UsageRepository
+from services.quota import QuotaService
 from services.usage import UsageService
 
 
@@ -366,3 +369,279 @@ class TestUsageAPI:
         assert response.status_code == 404
         data = response.json()
         assert data["detail"] == "Tenant not found"
+
+
+class TestQuotaEnforcement:
+    """Tests for quota enforcement."""
+
+    @pytest.mark.asyncio
+    async def test_quota_allowed_below_limit(self, db_session: AsyncSession):
+        """Test that usage is allowed when below quota."""
+        from models.billing import Tenant
+
+        tenant = Tenant(name="Test Tenant", slug="quota-allowed")
+        db_session.add(tenant)
+        await db_session.commit()
+        await db_session.refresh(tenant)
+
+        # Create FREE plan subscription (1000 api calls, 100000 ai tokens)
+        plan_repo = PlanRepository(db_session)
+        free_plan = await plan_repo.get_by_name(PlanName.FREE)
+        assert free_plan is not None
+
+        from models.billing import Subscription, SubscriptionStatus
+        from services.billing_period import get_billing_period_bounds
+        now = datetime.now(UTC)
+        period_start, period_end = get_billing_period_bounds(now)
+
+        subscription = Subscription(
+            tenant_id=tenant.id,
+            plan_id=free_plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=period_start,
+            current_period_end=period_end,
+        )
+        db_session.add(subscription)
+        await db_session.commit()
+
+        quota_service = QuotaService(db_session)
+        result = await quota_service.check_quota(tenant_id=tenant.id, api_calls=10, ai_input_tokens=100)
+
+        assert result.allowed is True
+        assert result.api_calls_limit == 1000
+        assert result.ai_tokens_limit == 100000
+        assert result.api_calls_remaining == 990
+        assert result.ai_tokens_remaining == 99900
+
+    @pytest.mark.asyncio
+    async def test_quota_exceeded_api_calls(self, db_session: AsyncSession):
+        """Test that quota is enforced for API calls."""
+        from models.billing import PlanName, Tenant
+        from services.usage import UsageService
+
+        tenant = Tenant(name="Test Tenant", slug="quota-api-exceeded")
+        db_session.add(tenant)
+        await db_session.commit()
+        await db_session.refresh(tenant)
+
+        plan_repo = PlanRepository(db_session)
+        free_plan = await plan_repo.get_by_name(PlanName.FREE)
+        assert free_plan is not None
+
+        from models.billing import Subscription, SubscriptionStatus
+        from services.billing_period import get_billing_period_bounds
+        now = datetime.now(UTC)
+        period_start, period_end = get_billing_period_bounds(now)
+
+        subscription = Subscription(
+            tenant_id=tenant.id,
+            plan_id=free_plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=period_start,
+            current_period_end=period_end,
+        )
+        db_session.add(subscription)
+        await db_session.commit()
+
+        # Record some usage first
+        usage_service = UsageService(db_session)
+        await usage_service.record_usage(tenant_id=tenant.id, idempotency_key="use-1", api_calls=990)
+
+        quota_service = QuotaService(db_session)
+
+        # Next request should exceed quota
+        result = await quota_service.check_quota(tenant_id=tenant.id, api_calls=20)
+        assert result.allowed is False
+        assert result.error_message is not None
+        assert "API calls quota exceeded" in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_quota_exceeded_ai_tokens(self, db_session: AsyncSession):
+        """Test that quota is enforced for AI tokens."""
+        from models.billing import PlanName, Tenant
+        from services.usage import UsageService
+
+        tenant = Tenant(name="Test Tenant", slug="quota-ai-exceeded")
+        db_session.add(tenant)
+        await db_session.commit()
+        await db_session.refresh(tenant)
+
+        plan_repo = PlanRepository(db_session)
+        free_plan = await plan_repo.get_by_name(PlanName.FREE)
+        assert free_plan is not None
+
+        from models.billing import Subscription, SubscriptionStatus
+        from services.billing_period import get_billing_period_bounds
+        now = datetime.now(UTC)
+        period_start, period_end = get_billing_period_bounds(now)
+
+        subscription = Subscription(
+            tenant_id=tenant.id,
+            plan_id=free_plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=period_start,
+            current_period_end=period_end,
+        )
+        db_session.add(subscription)
+        await db_session.commit()
+
+        # Record some usage first
+        usage_service = UsageService(db_session)
+        await usage_service.record_usage(tenant_id=tenant.id, idempotency_key="use-1", ai_input_tokens=99000)
+
+        quota_service = QuotaService(db_session)
+
+        # Next request should exceed quota
+        result = await quota_service.check_quota(tenant_id=tenant.id, ai_input_tokens=2000)
+        assert result.allowed is False
+        assert result.error_message is not None
+        assert "AI tokens quota exceeded" in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_quota_exact_boundary(self, db_session: AsyncSession):
+        """Test quota behavior at exact boundary."""
+        from models.billing import PlanName, Tenant
+        from services.usage import UsageService
+
+        tenant = Tenant(name="Test Tenant", slug="quota-boundary")
+        db_session.add(tenant)
+        await db_session.commit()
+        await db_session.refresh(tenant)
+
+        plan_repo = PlanRepository(db_session)
+        free_plan = await plan_repo.get_by_name(PlanName.FREE)
+        assert free_plan is not None
+
+        from models.billing import Subscription, SubscriptionStatus
+        from services.billing_period import get_billing_period_bounds
+        now = datetime.now(UTC)
+        period_start, period_end = get_billing_period_bounds(now)
+
+        subscription = Subscription(
+            tenant_id=tenant.id,
+            plan_id=free_plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=period_start,
+            current_period_end=period_end,
+        )
+        db_session.add(subscription)
+        await db_session.commit()
+
+        # Record exactly up to the limit
+        usage_service = UsageService(db_session)
+        await usage_service.record_usage(tenant_id=tenant.id, idempotency_key="use-1", api_calls=1000)
+
+        quota_service = QuotaService(db_session)
+
+        # One more should fail
+        result = await quota_service.check_quota(tenant_id=tenant.id, api_calls=1)
+        assert result.allowed is False
+
+    @pytest.mark.asyncio
+    async def test_quota_inactive_subscription_uses_free_limits(self, db_session: AsyncSession):
+        """Test that inactive subscription falls back to FREE plan limits."""
+        from models.billing import PlanName, Tenant
+
+        tenant = Tenant(name="Test Tenant", slug="quota-inactive")
+        db_session.add(tenant)
+        await db_session.commit()
+        await db_session.refresh(tenant)
+
+        plan_repo = PlanRepository(db_session)
+        free_plan = await plan_repo.get_by_name(PlanName.FREE)
+        pro_plan = await plan_repo.get_by_name(PlanName.PRO)
+        assert free_plan is not None
+        assert pro_plan is not None
+
+        from models.billing import Subscription, SubscriptionStatus
+        from services.billing_period import get_billing_period_bounds
+        now = datetime.now(UTC)
+        period_start, period_end = get_billing_period_bounds(now)
+
+        # Create subscription with PRO plan but INACTIVE status
+        subscription = Subscription(
+            tenant_id=tenant.id,
+            plan_id=pro_plan.id,
+            status=SubscriptionStatus.PAST_DUE,
+            current_period_start=period_start,
+            current_period_end=period_end,
+        )
+        db_session.add(subscription)
+        await db_session.commit()
+
+        quota_service = QuotaService(db_session)
+        # Should use FREE plan limits (1000) not PRO plan limits (100000)
+        result = await quota_service.check_quota(tenant_id=tenant.id, api_calls=5000)
+        assert result.allowed is False  # FREE limit is 1000
+        assert result.api_calls_limit == 1000
+
+    @pytest.mark.asyncio
+    async def test_quota_no_subscription_uses_free_limits(self, db_session: AsyncSession):
+        """Test that tenant without subscription uses FREE plan limits."""
+        from models.billing import Tenant
+
+        tenant = Tenant(name="Test Tenant", slug="quota-no-sub")
+        db_session.add(tenant)
+        await db_session.commit()
+        await db_session.refresh(tenant)
+
+        quota_service = QuotaService(db_session)
+        # Should use FREE plan limits
+        result = await quota_service.check_quota(tenant_id=tenant.id, api_calls=500)
+        assert result.allowed is True
+        assert result.api_calls_limit == 1000
+
+        result = await quota_service.check_quota(tenant_id=tenant.id, api_calls=2000)
+        assert result.allowed is False
+
+    @pytest.mark.asyncio
+    async def test_quota_ai_token_categories_summed(self, db_session: AsyncSession):
+        """Test that all AI token categories are summed for quota."""
+        from models.billing import PlanName, Tenant
+        from services.usage import UsageService
+
+        tenant = Tenant(name="Test Tenant", slug="quota-ai-categories")
+        db_session.add(tenant)
+        await db_session.commit()
+        await db_session.refresh(tenant)
+
+        plan_repo = PlanRepository(db_session)
+        free_plan = await plan_repo.get_by_name(PlanName.FREE)
+        assert free_plan is not None
+
+        from models.billing import Subscription, SubscriptionStatus
+        from services.billing_period import get_billing_period_bounds
+        now = datetime.now(UTC)
+        period_start, period_end = get_billing_period_bounds(now)
+
+        subscription = Subscription(
+            tenant_id=tenant.id,
+            plan_id=free_plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=period_start,
+            current_period_end=period_end,
+        )
+        db_session.add(subscription)
+        await db_session.commit()
+
+        # Record usage across different categories that sum to near limit
+        usage_service = UsageService(db_session)
+        await usage_service.record_usage(
+            tenant_id=tenant.id,
+            idempotency_key="use-1",
+            ai_input_tokens=30000,
+            ai_cached_input_tokens=20000,
+            ai_output_tokens=25000,
+            ai_reasoning_tokens=15000,
+        )
+        # Total = 90000, should be allowed
+
+        quota_service = QuotaService(db_session)
+
+        # Adding more should exceed
+        result = await quota_service.check_quota(
+            tenant_id=tenant.id,
+            ai_input_tokens=20000,
+        )
+        # Total would be 110000 > 100000
+        assert result.allowed is False
