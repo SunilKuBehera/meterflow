@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps import get_db
 from repositories.billing import TenantRepository
 from schemas.billing import UsageRecord
-from services.usage import QuotaExceededError, UsageService
+from services.quota import QuotaExceededError
+from services.usage import UsageService
 
 router = APIRouter(prefix="/usage", tags=["usage"])
 
@@ -70,7 +71,5 @@ async def get_usage(
         )
 
     usage_service = UsageService(db)
-    usage_events = await usage_service.get_usage_by_tenant(
-        tenant_id, limit=limit, offset=offset
-    )
+    usage_events = await usage_service.get_usage_by_tenant(tenant_id, limit=limit, offset=offset)
     return usage_events

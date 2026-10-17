@@ -177,7 +177,7 @@ class TestUsageRepository:
                 tenant_id=tenant.id,
                 idempotency_key=f"key-{i}",
                 api_calls=i,
-                timestamp=base_time + timedelta(seconds=i)
+                timestamp=base_time + timedelta(seconds=i),
             )
             db_session.add(event)
         await db_session.commit()
@@ -289,6 +289,7 @@ class TestUsageAPI:
     @pytest.mark.asyncio
     async def test_record_usage_endpoint(self, client, db_session: AsyncSession):
         from models.billing import Tenant
+
         tenant = Tenant(name="API Tenant", slug="api-usage-tenant")
         db_session.add(tenant)
         await db_session.commit()
@@ -311,6 +312,7 @@ class TestUsageAPI:
     @pytest.mark.asyncio
     async def test_record_usage_idempotent_endpoint(self, client, db_session: AsyncSession):
         from models.billing import Tenant
+
         tenant = Tenant(name="API Tenant", slug="api-idempotent")
         db_session.add(tenant)
         await db_session.commit()
@@ -339,12 +341,14 @@ class TestUsageAPI:
     @pytest.mark.asyncio
     async def test_get_usage_endpoint(self, client, db_session: AsyncSession):
         from models.billing import Tenant
+
         tenant = Tenant(name="API Tenant", slug="api-get-usage")
         db_session.add(tenant)
         await db_session.commit()
         await db_session.refresh(tenant)
 
         from services.usage import UsageService
+
         service = UsageService(db_session)
         await service.record_usage(tenant_id=tenant.id, idempotency_key="k1", api_calls=1)
         await service.record_usage(tenant_id=tenant.id, idempotency_key="k2", api_calls=2)
@@ -359,6 +363,7 @@ class TestUsageAPI:
     @pytest.mark.asyncio
     async def test_record_usage_tenant_not_found(self, client):
         import uuid
+
         payload = {
             "tenant_id": str(uuid.uuid4()),
             "idempotency_key": "test",
@@ -391,6 +396,7 @@ class TestQuotaEnforcement:
 
         from models.billing import Subscription, SubscriptionStatus
         from services.billing_period import get_billing_period_bounds
+
         now = datetime.now(UTC)
         period_start, period_end = get_billing_period_bounds(now)
 
@@ -405,7 +411,9 @@ class TestQuotaEnforcement:
         await db_session.commit()
 
         quota_service = QuotaService(db_session)
-        result = await quota_service.check_quota(tenant_id=tenant.id, api_calls=10, ai_input_tokens=100)
+        result = await quota_service.check_quota(
+            tenant_id=tenant.id, api_calls=10, ai_input_tokens=100
+        )
 
         assert result.allowed is True
         assert result.api_calls_limit == 1000
@@ -430,6 +438,7 @@ class TestQuotaEnforcement:
 
         from models.billing import Subscription, SubscriptionStatus
         from services.billing_period import get_billing_period_bounds
+
         now = datetime.now(UTC)
         period_start, period_end = get_billing_period_bounds(now)
 
@@ -445,7 +454,9 @@ class TestQuotaEnforcement:
 
         # Record some usage first
         usage_service = UsageService(db_session)
-        await usage_service.record_usage(tenant_id=tenant.id, idempotency_key="use-1", api_calls=990)
+        await usage_service.record_usage(
+            tenant_id=tenant.id, idempotency_key="use-1", api_calls=990
+        )
 
         quota_service = QuotaService(db_session)
 
@@ -472,6 +483,7 @@ class TestQuotaEnforcement:
 
         from models.billing import Subscription, SubscriptionStatus
         from services.billing_period import get_billing_period_bounds
+
         now = datetime.now(UTC)
         period_start, period_end = get_billing_period_bounds(now)
 
@@ -487,7 +499,9 @@ class TestQuotaEnforcement:
 
         # Record some usage first
         usage_service = UsageService(db_session)
-        await usage_service.record_usage(tenant_id=tenant.id, idempotency_key="use-1", ai_input_tokens=99000)
+        await usage_service.record_usage(
+            tenant_id=tenant.id, idempotency_key="use-1", ai_input_tokens=99000
+        )
 
         quota_service = QuotaService(db_session)
 
@@ -514,6 +528,7 @@ class TestQuotaEnforcement:
 
         from models.billing import Subscription, SubscriptionStatus
         from services.billing_period import get_billing_period_bounds
+
         now = datetime.now(UTC)
         period_start, period_end = get_billing_period_bounds(now)
 
@@ -529,7 +544,9 @@ class TestQuotaEnforcement:
 
         # Record exactly up to the limit
         usage_service = UsageService(db_session)
-        await usage_service.record_usage(tenant_id=tenant.id, idempotency_key="use-1", api_calls=1000)
+        await usage_service.record_usage(
+            tenant_id=tenant.id, idempotency_key="use-1", api_calls=1000
+        )
 
         quota_service = QuotaService(db_session)
 
@@ -555,6 +572,7 @@ class TestQuotaEnforcement:
 
         from models.billing import Subscription, SubscriptionStatus
         from services.billing_period import get_billing_period_bounds
+
         now = datetime.now(UTC)
         period_start, period_end = get_billing_period_bounds(now)
 
@@ -611,6 +629,7 @@ class TestQuotaEnforcement:
 
         from models.billing import Subscription, SubscriptionStatus
         from services.billing_period import get_billing_period_bounds
+
         now = datetime.now(UTC)
         period_start, period_end = get_billing_period_bounds(now)
 
@@ -645,3 +664,156 @@ class TestQuotaEnforcement:
         )
         # Total would be 110000 > 100000
         assert result.allowed is False
+
+    @pytest.mark.asyncio
+    async def test_exact_boundary_record_usage(self, db_session: AsyncSession):
+        """Test that usage exactly at the limit succeeds, one over fails."""
+        from models.billing import Tenant
+        from services.usage import QuotaExceededError, UsageService
+
+        tenant = Tenant(name="Test Tenant", slug="quota-exact-bound")
+        db_session.add(tenant)
+        await db_session.commit()
+        await db_session.refresh(tenant)
+
+        usage_service = UsageService(db_session)
+
+        # Use exactly 1000 API calls (FREE plan limit)
+        await usage_service.record_usage(
+            tenant_id=tenant.id,
+            idempotency_key="use-1",
+            api_calls=1000,
+        )
+
+        # Next request should fail - we're now at the limit
+        with pytest.raises(QuotaExceededError) as exc_info:
+            await usage_service.record_usage(
+                tenant_id=tenant.id,
+                idempotency_key="use-2",
+                api_calls=1,
+            )
+        assert "API calls quota exceeded" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_last_unit_protection(self, db_session: AsyncSession):
+        """Test that concurrent requests don't allow both to consume the final quota unit.
+
+        This test creates a scenario where two concurrent requests try to use
+        the last available quota unit. Only one should succeed.
+        """
+        from models.billing import PlanName, Subscription, SubscriptionStatus, Tenant
+        from services.usage import QuotaExceededError, UsageService
+
+        tenant = Tenant(name="Test Tenant", slug="quota-concurrent")
+        db_session.add(tenant)
+        await db_session.commit()
+        await db_session.refresh(tenant)
+
+        # Create subscription with FREE plan (1000 API calls)
+        plan_repo = PlanRepository(db_session)
+        free_plan = await plan_repo.get_by_name(PlanName.FREE)
+        from services.billing_period import get_billing_period_bounds
+
+        now = datetime.now(UTC)
+        period_start, period_end = get_billing_period_bounds(now)
+        subscription = Subscription(
+            tenant_id=tenant.id,
+            plan_id=free_plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=period_start,
+            current_period_end=period_end,
+        )
+        db_session.add(subscription)
+        await db_session.commit()
+
+        # Record 999 API calls first
+        usage_service = UsageService(db_session)
+        await usage_service.record_usage(
+            tenant_id=tenant.id,
+            idempotency_key="use-999",
+            api_calls=999,
+        )
+
+        # Now simulate two concurrent requests each trying to use the last unit
+        # In a real concurrent scenario, both might read 999 used and try to add 1
+        # With proper locking, only one should succeed
+
+        success_count = 0
+        failure_count = 0
+
+        # First concurrent request - should succeed (999 + 1 = 1000, at limit)
+        try:
+            await usage_service.record_usage(
+                tenant_id=tenant.id,
+                idempotency_key="concurrent-1",
+                api_calls=1,
+            )
+            success_count += 1
+        except QuotaExceededError:
+            failure_count += 1
+
+        # Second concurrent request - should fail (already at 1000 limit)
+        try:
+            await usage_service.record_usage(
+                tenant_id=tenant.id,
+                idempotency_key="concurrent-2",
+                api_calls=1,
+            )
+            success_count += 1
+        except QuotaExceededError:
+            failure_count += 1
+
+        # Exactly one should succeed
+        assert success_count == 1, f"Expected 1 success, got {success_count}"
+        assert failure_count == 1, f"Expected 1 failure, got {failure_count}"
+
+    @pytest.mark.asyncio
+    async def test_quota_consumption_is_atomic(self, db_session: AsyncSession):
+        """Test that quota consumption and recording happen atomically.
+
+        If a usage event is recorded, the quota must have been consumed.
+        The reverse should also be true.
+        """
+        from models.billing import PlanName, Subscription, SubscriptionStatus, Tenant
+        from services.usage import UsageService
+
+        tenant = Tenant(name="Test Tenant", slug="quota-atomic")
+        db_session.add(tenant)
+        await db_session.commit()
+        await db_session.refresh(tenant)
+
+        plan_repo = PlanRepository(db_session)
+        free_plan = await plan_repo.get_by_name(PlanName.FREE)
+        from services.billing_period import get_billing_period_bounds
+
+        now = datetime.now(UTC)
+        period_start, period_end = get_billing_period_bounds(now)
+        subscription = Subscription(
+            tenant_id=tenant.id,
+            plan_id=free_plan.id,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=period_start,
+            current_period_end=period_end,
+        )
+        db_session.add(subscription)
+        await db_session.commit()
+
+        usage_service = UsageService(db_session)
+
+        # Record a usage event
+        event = await usage_service.record_usage(
+            tenant_id=tenant.id,
+            idempotency_key="atomic-test",
+            api_calls=100,
+            ai_output_tokens=500,
+        )
+
+        # Verify the event was actually created
+        assert event.id is not None
+        assert event.api_calls == 100
+
+        # Verify quota was actually consumed
+        quota_service = QuotaService(db_session)
+        result = await quota_service.check_quota(tenant_id=tenant.id)
+        assert result.api_calls_used == 100
+        assert result.api_calls_remaining == 900

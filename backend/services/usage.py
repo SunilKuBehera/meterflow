@@ -4,14 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.billing import UsageEvent
 from repositories.usage import UsageRepository
-from services.quota import QuotaCheckResult, QuotaService
-
-
-class QuotaExceededError(Exception):
-    """Raised when quota is exceeded."""
-    def __init__(self, result: QuotaCheckResult):
-        self.result = result
-        super().__init__(result.error_message or "Quota exceeded")
+from services.quota import QuotaExceededError, QuotaService  # noqa: F401
 
 
 class UsageService:
@@ -36,6 +29,9 @@ class UsageService:
         return the existing event without creating a new one.
 
         Raises QuotaExceededError if the usage would exceed the tenant's quota.
+
+        This method performs quota consumption and usage recording in a single transaction
+        to ensure consistency under concurrent requests.
         """
         # Check for existing usage event with same idempotency key
         existing = await self.usage_repo.get_by_tenant_and_idempotency_key(
@@ -44,8 +40,9 @@ class UsageService:
         if existing:
             return existing
 
-        # Check quota before recording
-        quota_result = await self.quota_service.check_quota(
+        # Consume quota and create usage event atomically
+        # This will raise QuotaExceededError if quota would be exceeded
+        await self.quota_service.consume_quota(
             tenant_id=tenant_id,
             api_calls=api_calls,
             ai_input_tokens=ai_input_tokens,
@@ -53,10 +50,8 @@ class UsageService:
             ai_output_tokens=ai_output_tokens,
             ai_reasoning_tokens=ai_reasoning_tokens,
         )
-        if not quota_result.allowed:
-            raise QuotaExceededError(quota_result)
 
-        # Create new usage event
+        # Create new usage event (will be persisted when transaction commits)
         usage_event = UsageEvent(
             tenant_id=tenant_id,
             idempotency_key=idempotency_key,
