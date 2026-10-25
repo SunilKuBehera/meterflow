@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.billing import UsageEvent
 from repositories.usage import UsageRepository
-from services.quota import QuotaExceededError, QuotaService  # noqa: F401
+from services.quota import QuotaService
 
 
 class UsageService:
