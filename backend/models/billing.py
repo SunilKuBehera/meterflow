@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -62,6 +63,9 @@ class Tenant(Base):
         back_populates="tenant", cascade="all, delete-orphan", uselist=False
     )
     usage_events: Mapped[list["UsageEvent"]] = relationship(
+        back_populates="tenant", cascade="all, delete-orphan"
+    )
+    ai_requests: Mapped[list["AIRequest"]] = relationship(
         back_populates="tenant", cascade="all, delete-orphan"
     )
 
@@ -201,6 +205,65 @@ class Subscription(Base):
 
     def __repr__(self) -> str:
         return f"<Subscription(tenant_id={self.tenant_id}, plan_id={self.plan_id}, status={self.status})>"
+
+
+class AIRequestStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+
+
+class AIRequest(Base):
+    __tablename__ = "ai_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[AIRequestStatus] = mapped_column(
+        Enum(AIRequestStatus, native_enum=False), nullable=False, default=AIRequestStatus.PENDING, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    reserved_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cached_prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    usage_source: Mapped[str] = mapped_column(String(20), nullable=False, default="provider")
+    total_cost_paise: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    response_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    finish_reason: Mapped[str] = mapped_column(String(20), nullable=False, default="stop")
+    quota_exceeded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "idempotency_key", name="uq_ai_request_idempotency"),
+    )
+
+    tenant: Mapped[Tenant] = relationship(back_populates="ai_requests")
+
+    def __repr__(self) -> str:
+        return f"<AIRequest(id={self.id}, tenant_id={self.tenant_id}, status={self.status})>"
 
 
 class UsageEvent(Base):

@@ -13,6 +13,7 @@ Usage::
 """
 
 from core.config import get_settings
+from integrations.ai.ollama_provider import get_ollama_provider
 from integrations.ai.provider import (
     AIProvider,
     AIProviderUnavailableError,
@@ -23,14 +24,22 @@ from integrations.ai.provider import (
 def get_ai_provider(settings=None) -> AIProvider:
     """Return an AI provider based on environment configuration.
 
-    Implements the provider selection policy for Phase 8:
+    Implements the provider selection policy:
     - ``AI_PROVIDER=mock`` + ``USAGE_MODE=simulated`` → ``MockAIProvider``
     - ``AI_PROVIDER=mock`` + ``USAGE_MODE=real`` → unavailable (mock cannot
       report real usage)
-    - ``AI_PROVIDER=ollama`` / ``gemini`` → unavailable (Phase 9+)
+    - ``AI_PROVIDER=ollama`` → ``OllamaAIProvider`` when the configured model
+      is available on the local Ollama server; otherwise ``None`` so the
+      caller falls back to ``MockAIProvider``.
+    - ``AI_PROVIDER=gemini`` → unavailable (Phase 10+)
+
+    Returns:
+        An ``AIProvider`` instance or ``None`` when the requested provider is
+        not available. Callers should treat ``None`` as "use the mock provider."
 
     Raises:
-        AIProviderUnavailableError: If the requested provider is not available.
+        AIProviderUnavailableError: If ``AI_PROVIDER=mock`` is used with
+            ``USAGE_MODE=real``.
     """
     s = settings or get_settings()
 
@@ -44,10 +53,10 @@ def get_ai_provider(settings=None) -> AIProvider:
         return MockAIProvider(max_output_tokens=s.AI_MAX_OUTPUT_TOKENS)
 
     if s.AI_PROVIDER == "ollama":
-        raise AIProviderUnavailableError(
-            "Ollama provider integration is not available in Phase 8. "
-            "It will be implemented in Phase 9 (Real local AI with Ollama)."
-        )
+        provider = get_ollama_provider(s)
+        if provider is not None:
+            return provider
+        # Ollama not available → fall through to return None below
 
     if s.AI_PROVIDER == "gemini":
         raise AIProviderUnavailableError(
@@ -55,11 +64,9 @@ def get_ai_provider(settings=None) -> AIProvider:
             "It will be implemented after the core Ollama path is tested."
         )
 
-    # Should never reach here if settings validation is correct
-    raise AIProviderUnavailableError(
-        f"AI_PROVIDER='{s.AI_PROVIDER}' is not recognized. "
-        "Valid values: mock, ollama, gemini"
-    )
+    # Ollama returned None, or an unrecognized provider: fall back to mock
+    # so the application never crashes without an AI provider.
+    return MockAIProvider(max_output_tokens=s.AI_MAX_OUTPUT_TOKENS)
 
 
 def describe_provider(settings=None) -> dict:
@@ -79,9 +86,12 @@ def describe_provider(settings=None) -> dict:
 
     try:
         provider = get_ai_provider(s)
-        result["available"] = bool(provider.validate_connection())
-        result["model"] = provider.model
-        result["detail"] = f"Provider '{provider.name}' is configured."
+        if provider is not None:
+            result["available"] = bool(provider.validate_connection())
+            result["model"] = provider.model
+            result["detail"] = f"Provider '{provider.name}' is configured."
+        else:
+            result["detail"] = "No AI provider available; using mock provider."
     except AIProviderUnavailableError as e:
         result["detail"] = str(e)
 

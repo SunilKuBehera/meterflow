@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.billing import router as billing_router
 from api.usage import router as usage_router
+from api.ai import router as ai_router
 from core.config import get_settings
 from core.errors import register_exception_handlers
 from core.logging import configure_logging, get_logger
@@ -52,6 +53,7 @@ register_exception_handlers(app)
 # Include routers
 app.include_router(billing_router, prefix="/api/v1")
 app.include_router(usage_router, prefix="/api/v1")
+app.include_router(ai_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health", tags=["health"])

@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str | None = None
     GEMINI_MODEL: str = "gemini-1.5-flash"
 
+    # AI request bounds (applied before any provider call)
+    AI_MAX_PROMPT_CHARS: int = 8000
+    AI_MAX_OUTPUT_TOKENS: int = 4096
+    AI_DEFAULT_MAX_TOKENS: int = 512
+    AI_MAX_TEMPERATURE: float = 2.0
+
     # Razorpay (Test Mode only)
     RAZORPAY_KEY_ID: str | None = None
     RAZORPAY_KEY_SECRET: str | None = None
