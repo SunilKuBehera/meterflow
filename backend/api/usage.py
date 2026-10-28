@@ -1,6 +1,12 @@
+"""Usage HTTP routes.
+
+Provides endpoints for recording, retrieving, and listing usage events.
+All endpoints resolve tenant scope and delegate to :class:`services.usage.UsageService`.
+"""
+
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_db
@@ -70,6 +76,49 @@ async def get_usage(
             detail="Tenant not found",
         )
 
+    usage_service = UsageService(db)
+    usage_events = await usage_service.get_usage_by_tenant(tenant_id, limit=limit, offset=offset)
+    return usage_events
+
+
+@router.get("/", response_model=list[UsageRecord])
+async def list_usage(
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """List usage events for the authenticated tenant.
+
+    Pagination is supported via ``limit`` and ``offset`` parameters.
+    """
+    usage_service = UsageService(db)
+    usage_events = await usage_service.get_usage_by_tenant(
+        tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
+        limit=limit,
+        offset=offset,
+    )
+    return usage_events
+
+
+@router.get("/history/{tenant_id}", response_model=list[UsageRecord])
+async def get_usage_history(
+    tenant_id: UUID,
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get usage history for a tenant (alias for ``get_usage`` with explicit path)."""
+    return await get_usage(tenant_id=tenant_id, limit=limit, offset=offset, db=db)
+
+
+@router.get("/events/{tenant_id}", response_model=list[UsageRecord])
+async def get_usage_events(
+    tenant_id: UUID,
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get raw usage events for a tenant."""
     usage_service = UsageService(db)
     usage_events = await usage_service.get_usage_by_tenant(tenant_id, limit=limit, offset=offset)
     return usage_events
