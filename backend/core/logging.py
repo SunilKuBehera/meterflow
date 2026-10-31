@@ -59,3 +59,8 @@ def configure_logging() -> None:
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     return structlog.get_logger(name)  # type: ignore[no-any-return]
+
+
+def set_correlation_id(request_id: str) -> None:
+    """Set the correlation ID in the structlog context for the current request."""
+    structlog.contextvars.bind_contextvars(request_id=request_id)
