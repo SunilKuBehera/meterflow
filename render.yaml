@@ -1,0 +1,51 @@
+# render.yaml - Render deployment configuration for MeterFlow backend
+# This file should be placed at the project root
+
+services:
+  # Backend service (FastAPI)
+  - type: web
+    name: meterflow-backend
+    env: python
+    plan: free
+    buildCommand: |
+      pip install -e ".[dev]"
+      alembic upgrade head
+    startCommand: |
+      uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      # Razorpay configuration (get from Razorpay dashboard)
+      RAZORPAY_KEY_ID:
+        generate: false
+      RAZORPAY_KEY_SECRET:
+        generate: false
+      RAZORPAY_WEBHOOK_SECRET:
+        generate: false
+      
+      # Supabase configuration
+      SUPABASE_URL:
+        generate: false
+      SUPABASE_ANON_KEY:
+        generate: false
+      
+      # Application secrets
+      SECRET_KEY:
+        generate: true  # 32+ char random string
+      APP_ENV:
+        generate: false
+        value: production
+      
+      # Optional: Add more env vars as needed
+      # DATABASE_URL: ${DATA_URL}
+      # etc.
+
+    # Health check path - Render uses this to know service is up
+    healthCheckPath: /api/v1/health
+
+    # Auto-deploy on git push
+    autoDeploy: true
+
+    # Timeout settings
+    timeout: 15m
+
+    # Auto-cancel pending deployments after 7 days
+    # autoCancelBuilds: true
