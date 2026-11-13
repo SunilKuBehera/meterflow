@@ -6,12 +6,12 @@ services:
     name: meterflow-backend
     env: python
     plan: free
+    # Build from backend/ directory which contains pyproject.toml
     buildCommand: |
       cd backend && pip install -e .[dev]
       cd backend && alembic upgrade head
     startCommand: |
-      uvicorn app.main:app --host 0.0.0.0 --port \
-    healthCheckPath: /api/v1/health
+      uvicorn app.main:app --host 0.0.0.0 --port     healthCheckPath: /api/v1/health
     autoDeploy: true
     timeout: 15m
     envVars:
